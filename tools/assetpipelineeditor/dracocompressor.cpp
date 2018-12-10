@@ -8,8 +8,7 @@
 #include <draco/attributes/geometry_indices.h>
 #include <QVector>
 
-namespace
-{
+namespace {
 draco::GeometryAttribute::Type attributeTypeFromName(const QString &attributeName)
 {
     auto type = draco::GeometryAttribute::Type::INVALID;
@@ -19,7 +18,7 @@ draco::GeometryAttribute::Type attributeTypeFromName(const QString &attributeNam
     if (attributeName == Qt3DRender::QAttribute::defaultNormalAttributeName())
         type = draco::GeometryAttribute::Type::NORMAL;
     if (attributeName == Qt3DRender::QAttribute::defaultTextureCoordinate1AttributeName())
-        type =  draco::GeometryAttribute::Type::TEX_COORD;
+        type = draco::GeometryAttribute::Type::TEX_COORD;
     if (attributeName == Qt3DRender::QAttribute::defaultColorAttributeName())
         type = draco::GeometryAttribute::Type::COLOR;
 
@@ -63,10 +62,11 @@ draco::DataBuffer *createDracoBufferFromQBuffer(const Qt3DRender::QBuffer &qbuff
 {
     auto dracoDataBuffer = new draco::DataBuffer;
     dracoDataBuffer->Update(qbuffer.data().data(), qbuffer.data().size());
+    qDebug() << dracoDataBuffer->data();
     return dracoDataBuffer;
 }
 
-template <typename T>
+template<typename T>
 QVector<T> createIndicesVectorFromAttribute(const Qt3DRender::QAttribute &attribute)
 {
     const auto byteStride = attribute.byteStride();
@@ -78,27 +78,27 @@ QVector<T> createIndicesVectorFromAttribute(const Qt3DRender::QAttribute &attrib
 
     if (byteStride == 0)
         for (int i = 0, nbIndices = indicesVector.size(); i < nbIndices; ++i)
-            indicesVector[i] = static_cast<T>(data.data()[i*sizeof(T)]);
+            indicesVector[i] = static_cast<T>(data.data()[i * sizeof(T)]);
     else
         for (int i = 0, nbIndices = indicesVector.size(); i < nbIndices; ++i)
-            indicesVector[i] = static_cast<T>(data.data()[i*byteStride]);
+            indicesVector[i] = static_cast<T>(data.data()[i * byteStride]);
 
     return indicesVector;
 }
 
-template <typename T>
+template<typename T>
 void addFacesToMesh(const QVector<T> &indices, draco::Mesh &dracoMesh)
 {
-    for (int i, nbIndices = indices.size()/3; i < nbIndices; ++i)
-        dracoMesh.AddFace({static_cast<draco::IndexType<unsigned int, draco::PointIndex_tag_type_>>(indices[3*i+0]),
-                           static_cast<draco::IndexType<unsigned int, draco::PointIndex_tag_type_>>(indices[3*i+1]),
-                           static_cast<draco::IndexType<unsigned int, draco::PointIndex_tag_type_>>(indices[3*i+2])});
+    for (int i, nbIndices = indices.size() / 3; i < nbIndices; ++i)
+        dracoMesh.AddFace({ static_cast<draco::IndexType<unsigned int, draco::PointIndex_tag_type_>>(indices[3 * i + 0]),
+                            static_cast<draco::IndexType<unsigned int, draco::PointIndex_tag_type_>>(indices[3 * i + 1]),
+                            static_cast<draco::IndexType<unsigned int, draco::PointIndex_tag_type_>>(indices[3 * i + 2]) });
 }
-}
+} // namespace
 
 std::unique_ptr<draco::EncoderBuffer> compressMesh(const Qt3DRender::QGeometry &geometry)
 {
-    std::unique_ptr<draco::EncoderBuffer> compressBuffer = std::make_unique<draco::EncoderBuffer>();
+    std::unique_ptr<draco::EncoderBuffer> compressBuffer = std::unique_ptr<draco::EncoderBuffer>(new draco::EncoderBuffer);
     draco::Mesh dracoMesh;
 
     std::unordered_map<Qt3DRender::QBuffer *, draco::DataBuffer *> attributeBufferToDataBuffer;
@@ -114,7 +114,7 @@ std::unique_ptr<draco::EncoderBuffer> compressMesh(const Qt3DRender::QGeometry &
 
         const auto dracoDataType = dataTypeFromVertexBaseType(attribute->vertexBaseType());
         if (dracoAttributeType == draco::GeometryAttribute::Type::INVALID ||
-                        dracoDataType == draco::DataType::DT_INVALID)
+            dracoDataType == draco::DataType::DT_INVALID)
             continue;
 
         const auto attributeBuffer = attribute->buffer();
@@ -122,21 +122,26 @@ std::unique_ptr<draco::EncoderBuffer> compressMesh(const Qt3DRender::QGeometry &
             attributeBufferToDataBuffer[attributeBuffer] = createDracoBufferFromQBuffer(*attributeBuffer);
 
         const auto dracoBuffer = attributeBufferToDataBuffer[attributeBuffer];
+        auto data = reinterpret_cast<float *>(dracoBuffer->data());
+        qDebug() << "---Init---";
+        for (int i = 0; i < dracoBuffer->data_size() / sizeof(float); ++i)
+            qDebug()
+                    << data[i];
+        qDebug() << "---End----";
 
-        auto meshAttribute = std::make_unique<draco::GeometryAttribute>();
-        meshAttribute->Init(dracoAttributeType,
-                            dracoBuffer,
-                            attribute->vertexSize(),
-                            dracoDataType,
-                            false,
-                            attribute->byteStride(),
-                            attribute->byteOffset());
-        dracoMesh.AddAttribute(*meshAttribute.get(), true, attribute->count());
+        draco::GeometryAttribute meshAttribute;
+        meshAttribute.Init(dracoAttributeType,
+                           dracoBuffer,
+                           attribute->vertexSize(),
+                           dracoDataType,
+                           false,
+                           attribute->byteStride(),
+                           attribute->byteOffset());
+        dracoMesh.AddAttribute(meshAttribute, true, attribute->count() / attribute->vertexSize());
     }
 
-    if (indicesAttribute != nullptr)
-    {
-        dracoMesh.set_num_points(indicesAttribute->count()/3);
+    if (indicesAttribute != nullptr) {
+        dracoMesh.set_num_points(indicesAttribute->count());
         switch (indicesAttribute->vertexBaseType()) {
         case Qt3DRender::QAttribute::VertexBaseType::Byte:
             addFacesToMesh(createIndicesVectorFromAttribute<char>(*indicesAttribute), dracoMesh);
@@ -160,7 +165,11 @@ std::unique_ptr<draco::EncoderBuffer> compressMesh(const Qt3DRender::QGeometry &
     }
 
     draco::Encoder encoder;
-    encoder.EncodeMeshToBuffer(dracoMesh, compressBuffer.get());
+    const auto status = encoder.EncodeMeshToBuffer(dracoMesh, compressBuffer.get());
+    if (!status.ok()) {
+        qDebug() << status.code();
+        qDebug() << status.error_msg();
+    }
 
     return compressBuffer;
 }
